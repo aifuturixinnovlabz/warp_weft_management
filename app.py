@@ -903,6 +903,7 @@ page = st.sidebar.radio(
         "👷 Job Worker Entry",
         "✅ Finished Good Entries",
         "📊 Worker Summary",
+        "💰 Caution Deposits",  # ← NEW PAGE ADDED
         "⚙️ Manage Categories"
     ],
     label_visibility="collapsed"
@@ -993,148 +994,245 @@ if page == "🏠 Dashboard":
 
         st.markdown("---")
 
-        # Detailed Views
-        st.subheader("📊 Detailed Records")
+        # ========================================
+        # VIEW RECORDS SECTION (NEWLY ADDED)
+        # ========================================
+        st.subheader("📋 View Detailed Records")
+        st.info("💡 **Tip:** Use date filters to view records for specific time periods")
 
-        # 1. Inventory WARP Details
-        with st.expander("📦 View Inventory WARP Details", expanded=False):
-            inventory_warp = st.session_state.db.get_inventory_warp()
-            if inventory_warp:
-                df = pd.DataFrame(inventory_warp)
-                display_df = df[['date', 'yarn_name', 'design', 'paper_weight', 'beem_weight', 'net_weight']].copy()
-                display_df.columns = ['Date', 'Yarn Name', 'Design', 'Paper (kg)', 'Beem (kg)', 'Net Weight (kg)']
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+        # Date Range Filter (Common for all sections)
+        col1, col2 = st.columns(2)
+        with col1:
+            view_from_date = st.date_input(
+                "View From Date",
+                value=date.today() - timedelta(days=30),
+                key="view_from_date"
+            )
+        with col2:
+            view_to_date = st.date_input(
+                "View To Date",
+                value=date.today(),
+                key="view_to_date"
+            )
 
-                # Get distributed amount
-                jw_warp = st.session_state.db.get_job_worker_warp()
-                total_distributed = sum([item['net_weight'] for item in jw_warp]) if jw_warp else 0
-                total_procured = df['net_weight'].sum()
+        if view_from_date > view_to_date:
+            st.error("⚠️ From Date cannot be after To Date")
+        else:
+            st.markdown("---")
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.info(f"**Total Procured:** {total_procured:.2f} kg")
-                with col2:
-                    st.info(f"**Distributed:** {total_distributed:.2f} kg")
-                with col3:
-                    st.info(f"**Available:** {stats['inventory_warp']:.2f} kg")
-            else:
-                st.info("No inventory WARP records found")
+            # 1. INVENTORY WARP RECORDS
+            with st.expander("📦 Inventory WARP Records", expanded=False):
+                inventory_warp = st.session_state.db.get_inventory_warp_by_date(view_from_date, view_to_date)
 
-        # 2. Inventory WEFT Details
-        with st.expander("🧵 View Inventory WEFT Details", expanded=False):
-            inventory_weft = st.session_state.db.get_inventory_weft()
-            if inventory_weft:
-                df = pd.DataFrame(inventory_weft)
-                display_df = df[['date', 'colour', 'no_of_cones', 'weight_per_cone', 'total_weight']].copy()
-                display_df.columns = ['Date', 'Colour', 'Cones', 'Weight/Cone (kg)', 'Total (kg)']
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                if inventory_warp:
+                    df = pd.DataFrame(inventory_warp)
+                    display_df = df[['warp_number', 'date', 'yarn_type', 'warper_name', 'design',
+                                     'gross_weight', 'paper_weight', 'beam_weight', 'no_of_bell',
+                                     'reed', 'net_weight']].copy()
+                    display_df.columns = ['Warp #', 'Date', 'Yarn Type', 'Warper', 'Design',
+                                          'Gross (kg)', 'Paper (kg)', 'Beam (kg)', 'Bell',
+                                          'Reed', 'Net (kg)']
 
-                # Get distributed amount
-                jw_weft = st.session_state.db.get_job_worker_weft()
-                total_distributed = sum([item['total_weight'] for item in jw_weft]) if jw_weft else 0
-                total_procured = df['total_weight'].sum()
+                    # Format reed to show "N/A" if empty
+                    display_df['Reed'] = display_df['Reed'].apply(lambda x: x if x else 'N/A')
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.info(f"**Total Procured:** {total_procured:.2f} kg")
-                with col2:
-                    st.info(f"**Distributed:** {total_distributed:.2f} kg")
-                with col3:
-                    st.info(f"**Available:** {stats['inventory_weft']:.2f} kg")
-            else:
-                st.info("No inventory WEFT records found")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        # 3. Job Worker WARP Entries WITH BALANCE COLUMN
-        with st.expander("👷 View Job Worker WARP Entries", expanded=False):
-            jw_warp = st.session_state.db.get_job_worker_warp()
-            if jw_warp:
-                df = pd.DataFrame(jw_warp)
+                    # Summary
+                    total_gross = df['gross_weight'].sum()
+                    total_net = df['net_weight'].sum()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.info(f"**Total Records:** {len(df)}")
+                    with col2:
+                        st.info(f"**Total Gross Weight:** {total_gross:.2f} kg")
+                    with col3:
+                        st.info(f"**Total Net Weight:** {total_net:.2f} kg")
 
-                # Add balance column for each worker
-                balance_data = []
-                for _, row in df.iterrows():
-                    worker = row['job_worker']
-                    balance = st.session_state.db.get_worker_balance(worker)
-                    if balance:
-                        # Split balance equally between WARP and WEFT tables
-                        total_balance = balance['warp_balance'] + balance['weft_balance']
-                        half_balance = total_balance / 2
-                        balance_data.append(half_balance)
-                    else:
-                        balance_data.append(0)
+                    # Download button
+                    csv = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Download Inventory WARP (CSV)",
+                        csv,
+                        f"inventory_warp_{view_from_date}_{view_to_date}.csv",
+                        "text/csv",
+                        key='download-inv-warp'
+                    )
+                else:
+                    st.info("No inventory WARP records found in this date range")
 
-                df['balance'] = balance_data
+            # 2. INVENTORY WEFT RECORDS
+            with st.expander("🧵 Inventory WEFT Records", expanded=False):
+                inventory_weft = st.session_state.db.get_inventory_weft_by_date(view_from_date, view_to_date)
 
-                display_df = df[
-                    ['date', 'job_worker', 'yarn_name', 'design', 'paper_weight', 'beem_weight', 'net_weight',
-                     'balance']].copy()
-                display_df.columns = ['Date', 'Job Worker', 'Yarn Name', 'Design', 'Paper (kg)', 'Beem (kg)',
-                                      'Net (kg)', 'Balance (kg)']
-                display_df['Balance (kg)'] = display_df['Balance (kg)'].apply(lambda x: f"{x:.2f}")
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                if inventory_weft:
+                    df = pd.DataFrame(inventory_weft)
+                    display_df = df[['date', 'colour', 'gross_weight', 'no_of_cones',
+                                     'cone_weight', 'no_of_bags', 'net_weight']].copy()
+                    display_df.columns = ['Date', 'Colour', 'Gross (kg)', 'Cones',
+                                          'Cone Wt (kg)', 'Bags', 'Net (kg)']
 
-                total_distributed = df['net_weight'].sum()
-                st.info(f"**Total WARP Distributed: {total_distributed:.2f} kg**")
-            else:
-                st.info("No job worker WARP entries found")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        # 4. Job Worker WEFT Entries WITH BALANCE COLUMN
-        with st.expander("🧵 View Job Worker WEFT Entries", expanded=False):
-            jw_weft = st.session_state.db.get_job_worker_weft()
-            if jw_weft:
-                df = pd.DataFrame(jw_weft)
+                    # Summary
+                    total_gross = df['gross_weight'].sum()
+                    total_net = df['net_weight'].sum()
+                    total_cones = df['no_of_cones'].sum()
 
-                # Add balance column for each worker
-                balance_data = []
-                for _, row in df.iterrows():
-                    worker = row['job_worker']
-                    balance = st.session_state.db.get_worker_balance(worker)
-                    if balance:
-                        # Split balance equally between WARP and WEFT tables
-                        total_balance = balance['warp_balance'] + balance['weft_balance']
-                        half_balance = total_balance / 2
-                        balance_data.append(half_balance)
-                    else:
-                        balance_data.append(0)
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.info(f"**Total Records:** {len(df)}")
+                    with col2:
+                        st.info(f"**Total Cones:** {int(total_cones)}")
+                    with col3:
+                        st.info(f"**Total Gross:** {total_gross:.2f} kg")
+                    with col4:
+                        st.info(f"**Total Net:** {total_net:.2f} kg")
 
-                df['balance'] = balance_data
+                    # Download button
+                    csv = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Download Inventory WEFT (CSV)",
+                        csv,
+                        f"inventory_weft_{view_from_date}_{view_to_date}.csv",
+                        "text/csv",
+                        key='download-inv-weft'
+                    )
+                else:
+                    st.info("No inventory WEFT records found in this date range")
 
-                display_df = df[['date', 'job_worker', 'colour', 'no_of_cones', 'weight_per_cone', 'total_weight',
-                                 'balance']].copy()
-                display_df.columns = ['Date', 'Job Worker', 'Colour', 'Cones', 'Weight/Cone (kg)', 'Total (kg)',
-                                      'Balance (kg)']
-                display_df['Balance (kg)'] = display_df['Balance (kg)'].apply(lambda x: f"{x:.2f}")
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            # 3. JOB WORKER WARP ENTRIES
+            with st.expander("👷 Job Worker WARP Entries", expanded=False):
+                jw_warp = st.session_state.db.get_job_worker_warp_with_balance(view_from_date, view_to_date)
 
-                total_distributed = df['total_weight'].sum()
-                st.info(f"**Total WEFT Distributed: {total_distributed:.2f} kg**")
-            else:
-                st.info("No job worker WEFT entries found")
+                if jw_warp:
+                    df = pd.DataFrame(jw_warp)
+                    display_df = df[['warp_number', 'date', 'job_worker', 'yarn_type', 'warper_name', 'design',
+                                     'gross_weight', 'paper_weight', 'beam_weight', 'no_of_bell',
+                                     'reed', 'balance']].copy()
+                    display_df.columns = ['Warp #', 'Date', 'Job Worker', 'Yarn Type', 'Warper', 'Design',
+                                          'Gross (kg)', 'Paper (kg)', 'Beam (kg)', 'Bell',
+                                          'Reed', 'Balance (kg)']
 
-        # 5. Finished Products
-        with st.expander("✅ View Finished Products Details", expanded=False):
-            products = st.session_state.db.get_products()
-            if products:
-                df = pd.DataFrame(products)
-                display_df = df[['completion_date', 'job_worker', 'product_category', 'total_pieces',
-                                 'total_meters', 'product_weight', 'warp_used', 'weft_used']].copy()
-                display_df.columns = ['Date', 'Job Worker', 'Product', 'Pieces', 'Meters',
-                                      'Weight (kg)', 'WARP Used (kg)', 'WEFT Used (kg)']
-                display_df['Meters'] = display_df['Meters'].apply(lambda x: f"{x:.1f}")
-                display_df['Weight (kg)'] = display_df['Weight (kg)'].apply(lambda x: f"{x:.2f}")
-                display_df['WARP Used (kg)'] = display_df['WARP Used (kg)'].apply(lambda x: f"{x:.2f}")
-                display_df['WEFT Used (kg)'] = display_df['WEFT Used (kg)'].apply(lambda x: f"{x:.2f}")
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    # Format reed to show "N/A" if empty
+                    display_df['Reed'] = display_df['Reed'].apply(lambda x: x if x else 'N/A')
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.info(f"**Total Products: {stats['finished_products_count']}**")
-                with col2:
-                    st.info(f"**Total Weight: {stats['finished_products_weight']:.2f} kg**")
-                with col3:
-                    st.info(f"**Total Production: {stats['total_pieces']} pcs / {stats['total_meters']:.1f}m**")
-            else:
-                st.info("No finished products found")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    # Summary
+                    total_balance = df['balance'].iloc[-1] if len(df) > 0 else 0
+                    unique_workers = df['job_worker'].nunique()
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.info(f"**Total Entries:** {len(df)}")
+                    with col2:
+                        st.info(f"**Unique Workers:** {unique_workers}")
+                    with col3:
+                        st.info(f"**Final Balance:** {total_balance:.2f} kg")
+
+                    # Download button
+                    csv = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Download Job Worker WARP (CSV)",
+                        csv,
+                        f"job_worker_warp_{view_from_date}_{view_to_date}.csv",
+                        "text/csv",
+                        key='download-jw-warp'
+                    )
+                else:
+                    st.info("No job worker WARP entries found in this date range")
+
+            # 4. JOB WORKER WEFT ENTRIES
+            with st.expander("🎨 Job Worker WEFT Entries", expanded=False):
+                jw_weft = st.session_state.db.get_job_worker_weft_with_balance(view_from_date, view_to_date)
+
+                if jw_weft:
+                    df = pd.DataFrame(jw_weft)
+                    display_df = df[['date', 'job_worker', 'colour', 'gross_weight', 'no_of_cones',
+                                     'cone_weight', 'no_of_bags', 'balance']].copy()
+                    display_df.columns = ['Date', 'Job Worker', 'Colour', 'Gross (kg)', 'Cones',
+                                          'Cone Wt (kg)', 'Bags', 'Balance (kg)']
+
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    # Summary
+                    total_balance = df['balance'].iloc[-1] if len(df) > 0 else 0
+                    unique_workers = df['job_worker'].nunique()
+                    total_cones = df['no_of_cones'].sum()
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.info(f"**Total Entries:** {len(df)}")
+                    with col2:
+                        st.info(f"**Unique Workers:** {unique_workers}")
+                    with col3:
+                        st.info(f"**Total Cones:** {int(total_cones)}")
+                    with col4:
+                        st.info(f"**Final Balance:** {total_balance:.2f} kg")
+
+                    # Download button
+                    csv = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Download Job Worker WEFT (CSV)",
+                        csv,
+                        f"job_worker_weft_{view_from_date}_{view_to_date}.csv",
+                        "text/csv",
+                        key='download-jw-weft'
+                    )
+                else:
+                    st.info("No job worker WEFT entries found in this date range")
+
+            # 5. FINISHED PRODUCTS
+            with st.expander("✅ Finished Products", expanded=False):
+                products = st.session_state.db.get_all_products_by_date(view_from_date, view_to_date)
+
+                if products:
+                    df = pd.DataFrame(products)
+                    display_df = df[['completion_date', 'job_worker', 'product_category',
+                                     'total_pieces', 'total_meters', 'product_weight',
+                                     'warp_used', 'weft_used', 'notes']].copy()
+                    display_df.columns = ['Date', 'Job Worker', 'Product', 'Pieces', 'Meters',
+                                          'Weight (kg)', 'WARP Used (kg)', 'WEFT Used (kg)', 'Notes']
+
+                    # Format numeric columns
+                    display_df['Meters'] = display_df['Meters'].apply(lambda x: f"{x:.1f}")
+                    display_df['Weight (kg)'] = display_df['Weight (kg)'].apply(lambda x: f"{x:.2f}")
+                    display_df['WARP Used (kg)'] = display_df['WARP Used (kg)'].apply(lambda x: f"{x:.2f}")
+                    display_df['WEFT Used (kg)'] = display_df['WEFT Used (kg)'].apply(lambda x: f"{x:.2f}")
+                    display_df['Notes'] = display_df['Notes'].apply(lambda x: x if x else 'N/A')
+
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    # Summary
+                    total_pieces = df['total_pieces'].sum()
+                    total_meters = df['total_meters'].sum()
+                    total_weight = df['product_weight'].sum()
+                    unique_workers = df['job_worker'].nunique()
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.info(f"**Total Products:** {len(df)}")
+                    with col2:
+                        st.info(f"**Total Pieces:** {int(total_pieces)}")
+                    with col3:
+                        st.info(f"**Total Meters:** {total_meters:.1f}m")
+                    with col4:
+                        st.info(f"**Total Weight:** {total_weight:.2f} kg")
+
+                    # Download button
+                    csv = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "📥 Download Finished Products (CSV)",
+                        csv,
+                        f"finished_products_{view_from_date}_{view_to_date}.csv",
+                        "text/csv",
+                        key='download-products'
+                    )
+                else:
+                    st.info("No finished products found in this date range")
+
+
 
 # ========================================
 # ADD INVENTORY PAGE - WITH DROPDOWNS
@@ -1148,97 +1246,181 @@ elif page == "📦 Add Inventory":
     if material_type == "WARP":
         st.subheader("🧵 Add WARP to Inventory")
 
-        # Get yarn materials and designs from database - DROPDOWNS
+        # Get yarn materials, designs, warpers, and reed types from database
         yarn_materials = st.session_state.db.get_all_yarn_materials()
         design_types = st.session_state.db.get_all_design_weave_types()
+        warpers = st.session_state.db.get_all_warpers()  # NEW: Task #2
+        reed_types = st.session_state.db.get_all_reed_types()  # NEW: Task #7
 
         if not yarn_materials:
             st.warning("⚠️ Please add yarn/materials in 'Manage Categories' first")
         if not design_types:
             st.warning("⚠️ Please add design/weave types in 'Manage Categories' first")
+        if not warpers:
+            st.warning("⚠️ Please add warpers in 'Manage Categories' first")
 
         with st.form("inventory_warp_form"):
             col1, col2 = st.columns(2)
 
             with col1:
                 entry_date = st.date_input("Date *", value=date.today())
-                # CHANGED: Text input to DROPDOWN
-                yarn_name = st.selectbox("Yarn/Material Name *",
-                                        options=yarn_materials if yarn_materials else ["No materials available"])
-                # CHANGED: Text input to DROPDOWN
+                yarn_type = st.selectbox("Yarn/Material Type *",
+                                         options=yarn_materials if yarn_materials else ["No materials available"])
                 design = st.selectbox("Design/Weave Type *",
-                                     options=design_types if design_types else ["No designs available"])
+                                      options=design_types if design_types else ["No designs available"])
+                warper_name = st.selectbox("Warper Name *",  # NEW: Task #2
+                                           options=warpers if warpers else ["No warpers available"])
 
             with col2:
+                gross_weight = st.number_input("Gross Weight (kg) *", min_value=0.0, step=0.01,
+                                               format="%.2f")  # NEW: Task #3
                 paper_weight = st.number_input("Paper Weight (kg) *", min_value=0.0, step=0.01, format="%.2f")
-                beem_weight = st.number_input("Beem Weight (kg) *", min_value=0.0, step=0.01, format="%.2f")
+                beam_weight = st.number_input("Beam Weight (kg) *", min_value=0.0, step=0.01,
+                                              format="%.2f")  # RENAMED: Task #5
+                no_of_bell = st.number_input("No. of Bell *", min_value=0, step=1, format="%d")  # NEW: Task #6
+                reed = st.selectbox("Reed (Optional)",  # NEW: Task #7
+                                    options=[""] + (reed_types if reed_types else []),
+                                    help="Optional field - select reed type if applicable")
 
-            if beem_weight > 0 and paper_weight >= 0:
-                net_weight = beem_weight - paper_weight
+            # NEW FORMULA calculation preview (Task #4)
+            if gross_weight > 0:
+                net_weight = gross_weight - (paper_weight + beam_weight)
                 if net_weight > 0:
-                    st.success(f"✅ **Net Weight: {net_weight:.2f} kg** (Beem: {beem_weight:.2f} kg - Paper: {paper_weight:.2f} kg)")
+                    st.success(
+                        f"✅ **Net Weight: {net_weight:.2f} kg** = Gross ({gross_weight:.2f} kg) - [Paper ({paper_weight:.2f} kg) + Beam ({beam_weight:.2f} kg)]")
                 elif net_weight == 0:
                     st.warning("⚠️ Net weight is zero!")
                 else:
-                    st.error("❌ Paper weight cannot exceed beem weight")
+                    st.error("❌ Net weight must be positive! Paper + Beam weights exceed Gross weight.")
 
             submitted = st.form_submit_button("💾 Save to Inventory", use_container_width=True)
 
             if submitted:
-                if not yarn_materials or not design_types:
-                    st.error("Please add yarn/materials and designs in 'Manage Categories' first")
+                if not yarn_materials or not design_types or not warpers:
+                    st.error("Please add yarn/materials, designs, and warpers in 'Manage Categories' first")
                 else:
                     success, messages = st.session_state.service.add_inventory_warp(
-                        entry_date, yarn_name, design, paper_weight, beem_weight
+                        entry_date, yarn_type, warper_name, design, gross_weight,
+                        paper_weight, beam_weight, no_of_bell, reed
                     )
                     if success:
                         for msg in messages:
                             st.success(msg)
-                        # NO st.balloons() - Removed as requested
                     else:
                         for msg in messages:
                             st.error(msg)
 
+
     else:  # WEFT
+
         st.subheader("🎨 Add WEFT to Inventory")
+
         colors = st.session_state.db.get_all_colors()
 
         if not colors:
             st.warning("⚠️ Please add colors in 'Manage Categories' first")
 
         with st.form("inventory_weft_form"):
+
             col1, col2 = st.columns(2)
 
             with col1:
+
                 entry_date = st.date_input("Date *", value=date.today())
+
                 colour = st.selectbox("Colour *", options=colors if colors else ["No colors available"])
+
+                gross_weight = st.number_input("Gross Weight (kg) *", min_value=0.0, step=0.01,
+                                               format="%.2f")  # NEW: Task #3
+
                 no_of_cones = st.number_input("Number of Cones *", min_value=0, step=1, format="%d")
 
             with col2:
-                weight_per_cone = st.number_input("Weight per Cone (kg) *", min_value=0.0, step=0.01, format="%.2f")
 
-            if no_of_cones > 0 and weight_per_cone > 0:
-                total_weight = no_of_cones * weight_per_cone
-                st.success(f"✅ **Total Weight: {total_weight:.2f} kg** ({no_of_cones} cones × {weight_per_cone:.2f} kg/cone)")
+                # NEW: Task #9 - Cone Weight DROPDOWN (30g, 50g, 90g only)
+
+                cone_weight_options = {
+
+                    "30g (0.03 kg)": 0.03,
+
+                    "50g (0.05 kg)": 0.05,
+
+                    "90g (0.09 kg)": 0.09
+
+                }
+
+                cone_weight_label = st.selectbox("Cone Weight *", options=list(cone_weight_options.keys()))
+
+                cone_weight = cone_weight_options[cone_weight_label]
+
+                # NEW: Task #8 - No. of Bags (default 1, 200g per bag)
+
+                no_of_bags = st.number_input("No. of Bags *", min_value=1, value=1, step=1, format="%d",
+
+                                             help="Default: 1 bag (200g per bag)")
+
+            # NEW FORMULA calculation preview (Task #4)
+
+            BAG_WEIGHT = 0.2  # 200g per bag
+
+            if gross_weight > 0 and no_of_cones > 0:
+
+                net_weight = gross_weight - (cone_weight * no_of_cones + BAG_WEIGHT * no_of_bags)
+
+                if net_weight > 0:
+
+                    st.success(
+
+                        f"✅ **Net Weight: {net_weight:.2f} kg** = "
+
+                        f"Gross ({gross_weight:.2f} kg) - "
+
+                        f"[Cones ({cone_weight * no_of_cones:.2f} kg) + Bags ({BAG_WEIGHT * no_of_bags:.2f} kg)]"
+
+                    )
+
+                    st.info(
+                        f"📊 Breakdown: {no_of_cones} cones × {cone_weight}kg + {no_of_bags} bags × 0.2kg = {cone_weight * no_of_cones + BAG_WEIGHT * no_of_bags:.2f} kg total deduction")
+
+                elif net_weight == 0:
+
+                    st.warning("⚠️ Net weight is zero!")
+
+                else:
+
+                    st.error("❌ Net weight must be positive! Cone + Bag weights exceed Gross weight.")
 
             submitted = st.form_submit_button("💾 Save to Inventory", use_container_width=True)
 
             if submitted:
+
                 if not colors:
+
                     st.error("Please add colors first")
+
+                elif gross_weight == 0:
+
+                    st.error("Gross weight must be greater than 0")
+
                 elif no_of_cones == 0:
+
                     st.error("Number of cones must be greater than 0")
-                elif weight_per_cone == 0:
-                    st.error("Weight per cone must be greater than 0")
+
                 else:
+
                     success, messages = st.session_state.service.add_inventory_weft(
-                        entry_date, colour, no_of_cones, weight_per_cone
+
+                        entry_date, colour, gross_weight, no_of_cones, cone_weight, no_of_bags
+
                     )
+
                     if success:
+
                         for msg in messages:
                             st.success(msg)
-                        # NO st.balloons() - Removed as requested
+
                     else:
+
                         for msg in messages:
                             st.error(msg)
 
@@ -1271,59 +1453,81 @@ elif page == "👷 Job Worker Entry":
     if material_type == "WARP":
         st.subheader("📦 Distribute WARP to Job Worker")
 
-        # Get yarn materials and designs from database - DROPDOWNS
+        # Get yarn materials, designs, warpers, and reed types from database
         yarn_materials = st.session_state.db.get_all_yarn_materials()
         design_types = st.session_state.db.get_all_design_weave_types()
+        warpers = st.session_state.db.get_all_warpers()  # NEW: Task #2
+        reed_types = st.session_state.db.get_all_reed_types()  # NEW: Task #7
 
         if not yarn_materials:
             st.warning("⚠️ Please add yarn/materials in 'Manage Categories' first")
         if not design_types:
             st.warning("⚠️ Please add design/weave types in 'Manage Categories' first")
+        if not warpers:
+            st.warning("⚠️ Please add warpers in 'Manage Categories' first")
 
         with st.form("job_worker_warp_form"):
             col1, col2 = st.columns(2)
 
             with col1:
                 entry_date = st.date_input("Date *", value=date.today())
-                # CHANGED: Text input to DROPDOWN
-                yarn_name = st.selectbox("Yarn/Material Name *",
-                                        options=yarn_materials if yarn_materials else ["No materials available"])
-                # CHANGED: Text input to DROPDOWN
+                yarn_type = st.selectbox("Yarn/Material Type *",
+                                         options=yarn_materials if yarn_materials else ["No materials available"])
                 design = st.selectbox("Design/Weave Type *",
-                                     options=design_types if design_types else ["No designs available"])
-
-            with col2:
-                paper_weight = st.number_input("Paper Weight (kg) *", min_value=0.0, step=0.01, format="%.2f")
-                beem_weight = st.number_input("Beem Weight (kg) *", min_value=0.0, step=0.01, format="%.2f")
+                                      options=design_types if design_types else ["No designs available"])
+                warper_name = st.selectbox("Warper Name *",  # NEW: Task #2
+                                           options=warpers if warpers else ["No warpers available"])
                 job_worker = st.selectbox("Job Worker *", options=workers if workers else ["No workers available"])
 
-            if beem_weight > 0 and paper_weight >= 0:
-                net_weight = beem_weight - paper_weight
+            with col2:
+                gross_weight = st.number_input("Gross Weight (kg) *", min_value=0.0, step=0.01,
+                                               format="%.2f")  # NEW: Task #3
+                paper_weight = st.number_input("Paper Weight (kg) *", min_value=0.0, step=0.01, format="%.2f")
+                beam_weight = st.number_input("Beam Weight (kg) *", min_value=0.0, step=0.01,
+                                              format="%.2f")  # RENAMED: Task #5
+                no_of_bell = st.number_input("No. of Bell *", min_value=0, step=1, format="%d")  # NEW: Task #6
+                reed = st.selectbox("Reed (Optional)",  # NEW: Task #7
+                                    options=[""] + (reed_types if reed_types else []),
+                                    help="Optional field - select reed type if applicable")
+
+            # NEW FORMULA calculation preview (Task #4)
+            if gross_weight > 0:
+                net_weight = gross_weight - (paper_weight + beam_weight)
                 if net_weight > 0:
                     if net_weight > available_warp:
-                        st.error(f"❌ Insufficient inventory! Required: {net_weight:.2f} kg, Available: {available_warp:.2f} kg")
+                        st.error(
+                            f"❌ Insufficient inventory! Required: {net_weight:.2f} kg, Available: {available_warp:.2f} kg")
                     else:
                         st.success(f"✅ **Net Weight: {net_weight:.2f} kg** will be distributed to {job_worker}")
-                        st.info(f"Remaining inventory after distribution: {available_warp - net_weight:.2f} kg")
+                        st.info(
+                            f"📊 Calculation: Gross ({gross_weight:.2f} kg) - [Paper ({paper_weight:.2f} kg) + Beam ({beam_weight:.2f} kg)]")
+                        st.info(f"📦 Remaining inventory after distribution: {available_warp - net_weight:.2f} kg")
+                elif net_weight == 0:
+                    st.warning("⚠️ Net weight is zero!")
+                else:
+                    st.error("❌ Net weight must be positive! Paper + Beam weights exceed Gross weight.")
 
             submitted = st.form_submit_button("👷 Distribute to Worker", use_container_width=True)
 
             if submitted:
-                if not yarn_materials or not design_types or not workers:
-                    st.error("Please fill in all required fields and ensure workers, materials, and designs exist")
+                if not yarn_materials or not design_types or not warpers or not workers:
+                    st.error(
+                        "Please fill in all required fields and ensure workers, materials, designs, and warpers exist")
                 else:
                     success, messages = st.session_state.service.add_job_worker_warp(
-                        entry_date, yarn_name, design, paper_weight, beem_weight, job_worker
+                        entry_date, yarn_type, warper_name, design, gross_weight,
+                        paper_weight, beam_weight, no_of_bell, reed, job_worker
                     )
                     if success:
                         for msg in messages:
                             st.success(msg)
-                        # NO st.balloons() - Removed as requested
                     else:
                         for msg in messages:
                             st.error(msg)
 
+
     else:  # WEFT
+
         st.subheader("🧵 Distribute WEFT to Job Worker")
 
         colors = st.session_state.db.get_all_colors()
@@ -1332,41 +1536,114 @@ elif page == "👷 Job Worker Entry":
             st.warning("⚠️ Please add colors and job workers in 'Manage Categories' first")
 
         with st.form("job_worker_weft_form"):
+
             col1, col2 = st.columns(2)
 
             with col1:
+
                 entry_date = st.date_input("Date *", value=date.today())
+
                 colour = st.selectbox("Colour *", options=colors if colors else ["No colors available"])
+
+                gross_weight = st.number_input("Gross Weight (kg) *", min_value=0.0, step=0.01,
+                                               format="%.2f")  # NEW: Task #3
+
                 no_of_cones = st.number_input("Number of Cones *", min_value=0, step=1, format="%d")
 
-            with col2:
-                weight_per_cone = st.number_input("Weight per Cone (kg) *", min_value=0.0, step=0.01, format="%.2f")
                 job_worker = st.selectbox("Job Worker *", options=workers if workers else ["No workers available"])
 
-            if no_of_cones > 0 and weight_per_cone > 0:
-                total_weight = no_of_cones * weight_per_cone
-                if total_weight > available_weft:
-                    st.error(f"❌ Insufficient inventory! Required: {total_weight:.2f} kg, Available: {available_weft:.2f} kg")
+            with col2:
+
+                # NEW: Task #9 - Cone Weight DROPDOWN (30g, 50g, 90g only)
+
+                cone_weight_options = {
+
+                    "30g (0.03 kg)": 0.03,
+
+                    "50g (0.05 kg)": 0.05,
+
+                    "90g (0.09 kg)": 0.09
+
+                }
+
+                cone_weight_label = st.selectbox("Cone Weight *", options=list(cone_weight_options.keys()))
+
+                cone_weight = cone_weight_options[cone_weight_label]
+
+                # NEW: Task #8 - No. of Bags (default 1, 200g per bag)
+
+                no_of_bags = st.number_input("No. of Bags *", min_value=1, value=1, step=1, format="%d",
+
+                                             help="Default: 1 bag (200g per bag)")
+
+            # NEW FORMULA calculation preview (Task #4)
+
+            BAG_WEIGHT = 0.2  # 200g per bag
+
+            if gross_weight > 0 and no_of_cones > 0:
+
+                net_weight = gross_weight - (cone_weight * no_of_cones + BAG_WEIGHT * no_of_bags)
+
+                if net_weight > 0:
+
+                    if net_weight > available_weft:
+
+                        st.error(
+                            f"❌ Insufficient inventory! Required: {net_weight:.2f} kg, Available: {available_weft:.2f} kg")
+
+                    else:
+
+                        st.success(f"✅ **Net Weight: {net_weight:.2f} kg** will be distributed to {job_worker}")
+
+                        st.info(
+
+                            f"📊 Calculation: Gross ({gross_weight:.2f} kg) - "
+
+                            f"[Cones ({cone_weight * no_of_cones:.2f} kg) + Bags ({BAG_WEIGHT * no_of_bags:.2f} kg)]"
+
+                        )
+
+                        st.info(f"📦 Remaining inventory after distribution: {available_weft - net_weight:.2f} kg")
+
+                elif net_weight == 0:
+
+                    st.warning("⚠️ Net weight is zero!")
+
                 else:
-                    st.success(f"✅ **Total: {total_weight:.2f} kg** will be distributed to {job_worker}")
-                    st.info(f"Remaining inventory after distribution: {available_weft - total_weight:.2f} kg")
+
+                    st.error("❌ Net weight must be positive! Cone + Bag weights exceed Gross weight.")
 
             submitted = st.form_submit_button("👷 Distribute to Worker", use_container_width=True)
 
             if submitted:
+
                 if not colors or not workers:
+
                     st.error("Please add colors and workers first")
-                elif no_of_cones == 0 or weight_per_cone == 0:
-                    st.error("All fields must be greater than 0")
+
+                elif gross_weight == 0:
+
+                    st.error("Gross weight must be greater than 0")
+
+                elif no_of_cones == 0:
+
+                    st.error("Number of cones must be greater than 0")
+
                 else:
+
                     success, messages = st.session_state.service.add_job_worker_weft(
-                        entry_date, colour, no_of_cones, weight_per_cone, job_worker
+
+                        entry_date, colour, gross_weight, no_of_cones, cone_weight, no_of_bags, job_worker
+
                     )
+
                     if success:
+
                         for msg in messages:
                             st.success(msg)
-                        # NO st.balloons() - Removed as requested
+
                     else:
+
                         for msg in messages:
                             st.error(msg)
 
@@ -1532,13 +1809,71 @@ elif page == "📊 Worker Summary":
                     with col3:
                         st.info(
                             f"**Aadhar:**\n{worker_details['aadhar_number'] if worker_details['aadhar_number'] else 'N/A'}")
-                    with col4:
-                        balance = st.session_state.db.get_worker_balance(selected_worker)
-                        if balance:
-                            total = balance['warp_balance'] + balance['weft_balance']
-                            st.info(f"**Current Balance:**\n{total:.2f} kg")
+                        with col4:
+                            balance = st.session_state.db.get_worker_balance(selected_worker)
+                            if balance:
+                                total = balance['warp_balance'] + balance['weft_balance']
+                                st.info(f"**Current Balance:**\n{total:.2f} kg")
+
+                    # ADD THIS NEW SECTION HERE ↓
+                    st.markdown("---")
+                    st.markdown("### 💼 Total Material Balance")
+
+                    # Get summary with balance
+                    summary_data = st.session_state.db.get_worker_summary_with_balance(
+                        selected_worker, from_date, to_date
+                    )
+
+                    if summary_data:
+                        col1, col2, col3, col4, col5 = st.columns(5)
+
+                        with col1:
+                            st.metric(
+                                "WARP Distributed",
+                                f"{summary_data['warp_distributed']:.2f} kg",
+                                help="Total WARP given to worker in this period"
+                            )
+
+                        with col2:
+                            st.metric(
+                                "WEFT Distributed",
+                                f"{summary_data['weft_distributed']:.2f} kg",
+                                help="Total WEFT given to worker in this period"
+                            )
+
+                        with col3:
+                            st.metric(
+                                "Material Used",
+                                f"{summary_data['material_used']:.2f} kg",
+                                help="Total material used in products"
+                            )
+
+                        with col4:
+                            st.metric(
+                                "Period Balance",
+                                f"{summary_data['balance']:.2f} kg",
+                                help="Remaining balance for this period"
+                            )
+
+                        with col5:
+                            current_balance = st.session_state.db.get_worker_balance(selected_worker)
+                            total_current = (current_balance['warp_balance'] +
+                                             current_balance['weft_balance']) if current_balance else 0
+                            st.metric(
+                                "Current Total Balance",
+                                f"{total_current:.2f} kg",
+                                help="Current balance across all time"
+                            )
+
+                    st.markdown("---")  # EXISTING LINE - keep this
+
+                    # WARP Entries section continues below...
+                    st.markdown("### 📦 WARP Entries")
 
                 st.markdown("---")
+
+
+
 
                 # WARP Entries
                 st.markdown("### 📦 WARP Entries")
@@ -1546,8 +1881,14 @@ elif page == "📊 Worker Summary":
 
                 if warp_data:
                     df = pd.DataFrame(warp_data)
-                    display_df = df[['date', 'yarn_name', 'design', 'paper_weight', 'beem_weight', 'net_weight']].copy()
-                    display_df.columns = ['Date', 'Yarn Name', 'Design', 'Paper (kg)', 'Beem (kg)', 'Net (kg)']
+                    display_df = df[['warp_number', 'date', 'yarn_type', 'warper_name', 'design',
+                                     'gross_weight', 'paper_weight', 'beam_weight', 'no_of_bell',
+                                     'reed', 'net_weight']].copy()
+                    display_df.columns = ['Warp #', 'Date', 'Yarn Type', 'Warper', 'Design',
+                                          'Gross (kg)', 'Paper (kg)', 'Beam (kg)', 'Bell',
+                                          'Reed', 'Net (kg)']
+                    # Format reed to show "N/A" if empty
+                    display_df['Reed'] = display_df['Reed'].apply(lambda x: x if x else 'N/A')
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
                     total_warp = df['net_weight'].sum()
@@ -1563,11 +1904,13 @@ elif page == "📊 Worker Summary":
 
                 if weft_data:
                     df = pd.DataFrame(weft_data)
-                    display_df = df[['date', 'colour', 'no_of_cones', 'weight_per_cone', 'total_weight']].copy()
-                    display_df.columns = ['Date', 'Colour', 'Cones', 'Weight/Cone (kg)', 'Total (kg)']
+                    display_df = df[['date', 'colour', 'gross_weight', 'no_of_cones',
+                                     'cone_weight', 'no_of_bags', 'net_weight']].copy()
+                    display_df.columns = ['Date', 'Colour', 'Gross (kg)', 'Cones',
+                                          'Cone Wt (kg)', 'Bags', 'Net (kg)']
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-                    total_weft = df['total_weight'].sum()
+                    total_weft = df['net_weight'].sum()
                     st.info(f"**Total WEFT in period: {total_weft:.2f} kg** ({len(df)} entries)")
                 else:
                     st.info("No WEFT entries in this period")
@@ -1621,7 +1964,7 @@ elif page == "📊 Worker Summary":
                             report_data.append({
                                 'Type': 'WARP Entry',
                                 'Date': item['date'],
-                                'Details': f"{item['yarn_name']} - {item['design']}",
+                                'Details': f"{item['yarn_type']} - {item['design']}",  # FIXED: yarn_name → yarn_type
                                 'Quantity': f"{item['net_weight']:.2f} kg",
                                 'Job Worker': selected_worker
                             })
@@ -1632,7 +1975,7 @@ elif page == "📊 Worker Summary":
                                 'Type': 'WEFT Entry',
                                 'Date': item['date'],
                                 'Details': f"{item['colour']} - {item['no_of_cones']} cones",
-                                'Quantity': f"{item['total_weight']:.2f} kg",
+                                'Quantity': f"{item['net_weight']:.2f} kg",  # FIXED: total_weight → net_weight
                                 'Job Worker': selected_worker
                             })
 
@@ -1657,17 +2000,353 @@ elif page == "📊 Worker Summary":
                             key='download-worker-summary'
                         )
 
+
+
+# ========================================
+# CAUTION DEPOSIT TRACKING PAGE (NEW)
+# ========================================
+elif page == "💰 Caution Deposits":
+    st.title("💰 Caution Deposit Tracking")
+
+    # Tab selection
+    tab1, tab2, tab3 = st.tabs([
+        "📄 Paper Deposits (WARP)",
+        "📦 Bag Deposits (WEFT)",
+        "📊 Summary Report"
+    ])
+
+    # ========================================
+    # TAB 1: PAPER DEPOSITS (WARP)
+    # ========================================
+    with tab1:
+        st.subheader("📄 Paper Caution Deposits - ₹40/kg")
+
+        # Get all job workers for filter
+        workers = st.session_state.db.get_all_job_workers()
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            selected_worker_filter = st.selectbox(
+                "Filter by Job Worker (Optional)",
+                options=["All Workers"] + workers if workers else ["All Workers"]
+            )
+
+        with col2:
+            st.metric("Deposit Rate", "₹40 per kg", "Paper weight")
+
+        # Get pending deposits
+        if selected_worker_filter == "All Workers":
+            pending_deposits = st.session_state.db.get_pending_paper_deposits()
+        else:
+            pending_deposits = st.session_state.db.get_pending_paper_deposits(selected_worker_filter)
+
+        if pending_deposits:
+            st.markdown("---")
+            st.markdown("### 📋 Pending Paper Deposits")
+
+            for idx, deposit in enumerate(pending_deposits):
+                with st.expander(
+                        f"🔸 Warp #{deposit['warp_number']} - {deposit['job_worker']} - "
+                        f"₹{deposit['caution_deposit_paper']:.2f}",
+                        expanded=False
+                ):
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.info(f"**Date:** {deposit['date']}")
+                        st.info(f"**Paper Weight:** {deposit['paper_weight']:.2f} kg")
+                        st.info(f"**Deposit Amount:** ₹{deposit['caution_deposit_paper']:.2f}")
+
+                    with col2:
+                        paper_status = "✅ Returned" if deposit['paper_returned'] else "⏳ Pending"
+                        st.info(f"**Paper Status:** {paper_status}")
+
+                        if deposit['paper_returned']:
+                            st.info(f"**Return Date:** {deposit['paper_return_date']}")
+
+                        refund_status = "✅ Refunded" if deposit['deposit_refunded'] else "❌ Not Refunded"
+                        st.info(f"**Refund Status:** {refund_status}")
+
+                    with col3:
+                        st.markdown("#### 🔧 Actions")
+
+                        # Mark Paper Returned
+                        if not deposit['paper_returned']:
+                            with st.form(f"return_paper_{deposit['id']}"):
+                                return_date = st.date_input(
+                                    "Paper Return Date",
+                                    value=date.today(),
+                                    key=f"paper_return_date_{deposit['id']}"
+                                )
+
+                                if st.form_submit_button("📄 Mark Paper Returned", use_container_width=True):
+                                    success, messages = st.session_state.service.mark_paper_return(
+                                        deposit['id'], return_date
+                                    )
+                                    if success:
+                                        for msg in messages:
+                                            st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        for msg in messages:
+                                            st.error(msg)
+
+                        # Process Refund
+                        if deposit['paper_returned'] and not deposit['deposit_refunded']:
+                            with st.form(f"refund_paper_{deposit['id']}"):
+                                refund_date = st.date_input(
+                                    "Refund Date",
+                                    value=date.today(),
+                                    key=f"paper_refund_date_{deposit['id']}"
+                                )
+
+                                if st.form_submit_button("💰 Process Refund", use_container_width=True):
+                                    success, messages = st.session_state.service.process_paper_deposit_refund(
+                                        deposit['id'], refund_date
+                                    )
+                                    if success:
+                                        for msg in messages:
+                                            st.success(msg)
+                                        st.balloons()
+                                        st.rerun()
+                                    else:
+                                        for msg in messages:
+                                            st.error(msg)
+
+                        if deposit['deposit_refunded']:
+                            st.success(f"✅ Refunded on {deposit['deposit_refund_date']}")
+
+            # Summary
+            total_pending = sum([d['caution_deposit_paper'] for d in pending_deposits if not d['deposit_refunded']])
+            total_paper_pending = sum([d['paper_weight'] for d in pending_deposits if not d['paper_returned']])
+
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Pending Deposits", f"₹{total_pending:.2f}")
+            with col2:
+                st.metric("Papers Not Returned", f"{total_paper_pending:.2f} kg")
+            with col3:
+                st.metric("Total Records", len(pending_deposits))
+        else:
+            st.info("✅ No pending paper deposits found!")
+
+    # ========================================
+    # TAB 2: BAG DEPOSITS (WEFT)
+    # ========================================
+    with tab2:
+        st.subheader("📦 Bag Caution Deposits - ₹15/bag")
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            selected_worker_filter_bag = st.selectbox(
+                "Filter by Job Worker (Optional)",
+                options=["All Workers"] + workers if workers else ["All Workers"],
+                key="bag_worker_filter"
+            )
+
+        with col2:
+            st.metric("Deposit Rate", "₹15 per bag", "Fixed rate")
+
+        # Get pending bag deposits
+        if selected_worker_filter_bag == "All Workers":
+            pending_bag_deposits = st.session_state.db.get_pending_bag_deposits()
+        else:
+            pending_bag_deposits = st.session_state.db.get_pending_bag_deposits(selected_worker_filter_bag)
+
+        if pending_bag_deposits:
+            st.markdown("---")
+            st.markdown("### 📋 Pending Bag Deposits")
+
+            for idx, deposit in enumerate(pending_bag_deposits):
+                bags_remaining = deposit['no_of_bags'] - (deposit['bags_returned'] or 0)
+
+                with st.expander(
+                        f"🔸 {deposit['job_worker']} - {deposit['colour']} - "
+                        f"₹{deposit['caution_deposit_bags']:.2f} ({bags_remaining} bags pending)",
+                        expanded=False
+                ):
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.info(f"**Date:** {deposit['date']}")
+                        st.info(f"**Colour:** {deposit['colour']}")
+                        st.info(f"**Total Bags Issued:** {deposit['no_of_bags']}")
+                        st.info(f"**Deposit Amount:** ₹{deposit['caution_deposit_bags']:.2f}")
+
+                    with col2:
+                        bags_returned = deposit['bags_returned'] or 0
+                        st.info(f"**Bags Returned:** {bags_returned}/{deposit['no_of_bags']}")
+
+                        if deposit['bag_return_date']:
+                            st.info(f"**Last Return Date:** {deposit['bag_return_date']}")
+
+                        refund_status = "✅ Refunded" if deposit['deposit_refunded'] else "❌ Not Refunded"
+                        st.info(f"**Refund Status:** {refund_status}")
+
+                        if bags_remaining > 0:
+                            st.warning(f"⚠️ {bags_remaining} bags still pending")
+                        else:
+                            st.success("✅ All bags returned!")
+
+                    with col3:
+                        st.markdown("#### 🔧 Actions")
+
+                        # Mark Bags Returned (Partial/Full)
+                        if bags_remaining > 0:
+                            with st.form(f"return_bags_{deposit['id']}"):
+                                bags_to_return = st.number_input(
+                                    "Bags Being Returned",
+                                    min_value=1,
+                                    max_value=bags_remaining,
+                                    value=min(1, bags_remaining),
+                                    step=1,
+                                    key=f"bags_return_count_{deposit['id']}"
+                                )
+
+                                return_date = st.date_input(
+                                    "Bag Return Date",
+                                    value=date.today(),
+                                    key=f"bag_return_date_{deposit['id']}"
+                                )
+
+                                if st.form_submit_button("📦 Mark Bags Returned", use_container_width=True):
+                                    total_returned = bags_returned + bags_to_return
+                                    success, messages = st.session_state.service.mark_bag_return(
+                                        deposit['id'], total_returned, return_date
+                                    )
+                                    if success:
+                                        for msg in messages:
+                                            st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        for msg in messages:
+                                            st.error(msg)
+
+                        # Process Refund (only if all bags returned)
+                        if bags_remaining == 0 and not deposit['deposit_refunded']:
+                            with st.form(f"refund_bags_{deposit['id']}"):
+                                refund_date = st.date_input(
+                                    "Refund Date",
+                                    value=date.today(),
+                                    key=f"bag_refund_date_{deposit['id']}"
+                                )
+
+                                if st.form_submit_button("💰 Process Refund", use_container_width=True):
+                                    success, messages = st.session_state.service.process_bag_deposit_refund(
+                                        deposit['id'], refund_date
+                                    )
+                                    if success:
+                                        for msg in messages:
+                                            st.success(msg)
+                                        st.balloons()
+                                        st.rerun()
+                                    else:
+                                        for msg in messages:
+                                            st.error(msg)
+
+                        if deposit['deposit_refunded']:
+                            st.success(f"✅ Refunded on {deposit['deposit_refund_date']}")
+
+            # Summary
+            total_pending_bag = sum(
+                [d['caution_deposit_bags'] for d in pending_bag_deposits if not d['deposit_refunded']])
+            total_bags_not_returned = sum([
+                d['no_of_bags'] - (d['bags_returned'] or 0)
+                for d in pending_bag_deposits
+            ])
+
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Pending Deposits", f"₹{total_pending_bag:.2f}")
+            with col2:
+                st.metric("Bags Not Returned", total_bags_not_returned)
+            with col3:
+                st.metric("Total Records", len(pending_bag_deposits))
+        else:
+            st.info("✅ No pending bag deposits found!")
+
+    # ========================================
+    # TAB 3: SUMMARY REPORT
+    # ========================================
+    with tab3:
+        st.subheader("📊 Caution Deposit Summary Report")
+
+        workers = st.session_state.db.get_all_job_workers()
+
+        if workers:
+            st.markdown("### 👷 Worker-wise Deposit Summary")
+
+            summary_data = []
+
+            for worker in workers:
+                deposits = st.session_state.db.get_total_pending_deposits_by_worker(worker)
+
+                if deposits['total_pending'] > 0:
+                    summary_data.append({
+                        'Job Worker': worker,
+                        'Paper Deposits (₹)': f"₹{deposits['paper_deposits']:.2f}",
+                        'Bag Deposits (₹)': f"₹{deposits['bag_deposits']:.2f}",
+                        'Total Pending (₹)': f"₹{deposits['total_pending']:.2f}"
+                    })
+
+            if summary_data:
+                df = pd.DataFrame(summary_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                # Overall totals
+                total_paper = sum(
+                    [st.session_state.db.get_total_pending_deposits_by_worker(w)['paper_deposits'] for w in workers])
+                total_bag = sum(
+                    [st.session_state.db.get_total_pending_deposits_by_worker(w)['bag_deposits'] for w in workers])
+                total_all = total_paper + total_bag
+
+                st.markdown("---")
+                st.markdown("### 💰 Overall Summary")
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Total Paper Deposits", f"₹{total_paper:.2f}")
+                with col2:
+                    st.metric("Total Bag Deposits", f"₹{total_bag:.2f}")
+                with col3:
+                    st.metric("Grand Total Pending", f"₹{total_all:.2f}")
+                with col4:
+                    st.metric("Workers with Deposits", len(summary_data))
+
+                # Download report
+                st.markdown("---")
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "📥 Download Summary Report (CSV)",
+                    csv,
+                    f"caution_deposit_summary_{date.today()}.csv",
+                    "text/csv",
+                    key='download-deposit-summary'
+                )
+            else:
+                st.success("✅ No pending deposits found for any worker!")
+        else:
+            st.info("No job workers found. Please add workers first.")
+
+
 # ========================================
 # MANAGE CATEGORIES PAGE - WITH 5 TABS
 # ========================================
 elif page == "⚙️ Manage Categories":
     st.title("⚙️ Manage Categories")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🎨 Colors",
         "🧵 Yarn/Materials",
         "🎭 Design/Weave Types",
-        "👷 Job Workers",
+        "👷 Warpers",  # NEW: Task #2
+        "🔧 Reed Types",  # NEW: Task #7
+        "👨‍🏭 Job Workers",
         "📦 Product Categories"
     ])
 
@@ -1878,9 +2557,147 @@ elif page == "⚙️ Manage Categories":
                     else:
                         st.error("Please enter a design name")
 
-    # TAB 4: JOB WORKERS - WITH USAGE WARNING
-    with tab4:
-        st.subheader("👷 Job Worker Management")
+        # TAB 4: WARPERS (NEW - Task #2)
+        with tab4:
+            st.subheader("👷 Warper Management")
+
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                st.markdown("#### Current Warpers")
+                warpers = st.session_state.db.get_all_warpers()
+
+                if warpers:
+                    for idx, warper in enumerate(warpers):
+                        col_a, col_b, col_c = st.columns([3, 1, 1])
+
+                        with col_a:
+                            st.write(f"**{idx + 1}.** {warper}")
+
+                        with col_b:
+                            if st.button("✏️ Edit", key=f"edit_warper_{idx}", help=f"Edit {warper}"):
+                                st.session_state[f'editing_warper_{idx}'] = True
+
+                        with col_c:
+                            if st.button("🗑️ Delete", key=f"del_warper_{idx}", help=f"Delete {warper}"):
+                                usage_count = st.session_state.db.check_warper_usage(warper)
+                                if usage_count > 0:
+                                    st.warning(f"⚠️ Cannot delete! '{warper}' is used in {usage_count} records")
+                                else:
+                                    if st.session_state.db.delete_warper(warper):
+                                        st.success(f"Deleted: {warper}")
+                                        st.rerun()
+
+                        if st.session_state.get(f'editing_warper_{idx}', False):
+                            with st.form(f"edit_form_warper_{idx}"):
+                                new_name = st.text_input("New Warper Name", value=warper)
+                                col_save, col_cancel = st.columns(2)
+
+                                with col_save:
+                                    if st.form_submit_button("💾 Save"):
+                                        if st.session_state.db.update_warper(warper, new_name):
+                                            st.success(f"Updated to: {new_name}")
+                                            st.session_state[f'editing_warper_{idx}'] = False
+                                            st.rerun()
+
+                                with col_cancel:
+                                    if st.form_submit_button("❌ Cancel"):
+                                        st.session_state[f'editing_warper_{idx}'] = False
+                                        st.rerun()
+                else:
+                    st.info("No warpers available")
+
+            with col2:
+                st.markdown("#### Add New Warper")
+                with st.form("add_warper_form"):
+                    new_warper = st.text_input("Warper Name")
+                    submitted = st.form_submit_button("➕ Add", use_container_width=True)
+
+                    if submitted:
+                        if new_warper:
+                            success, messages = st.session_state.service.add_warper(new_warper)
+                            if success:
+                                for msg in messages:
+                                    st.success(msg)
+                                st.rerun()
+                            else:
+                                for msg in messages:
+                                    st.error(msg)
+                        else:
+                            st.error("Please enter a warper name")
+
+        # TAB 5: REED TYPES (NEW - Task #7)
+        with tab5:
+            st.subheader("🔧 Reed Type Management")
+
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                st.markdown("#### Current Reed Types")
+                reed_types = st.session_state.db.get_all_reed_types()
+
+                if reed_types:
+                    for idx, reed in enumerate(reed_types):
+                        col_a, col_b, col_c = st.columns([3, 1, 1])
+
+                        with col_a:
+                            st.write(f"**{idx + 1}.** {reed}")
+
+                        with col_b:
+                            if st.button("✏️ Edit", key=f"edit_reed_{idx}", help=f"Edit {reed}"):
+                                st.session_state[f'editing_reed_{idx}'] = True
+
+                        with col_c:
+                            if st.button("🗑️ Delete", key=f"del_reed_{idx}", help=f"Delete {reed}"):
+                                usage_count = st.session_state.db.check_reed_type_usage(reed)
+                                if usage_count > 0:
+                                    st.warning(f"⚠️ Cannot delete! '{reed}' is used in {usage_count} records")
+                                else:
+                                    if st.session_state.db.delete_reed_type(reed):
+                                        st.success(f"Deleted: {reed}")
+                                        st.rerun()
+
+                        if st.session_state.get(f'editing_reed_{idx}', False):
+                            with st.form(f"edit_form_reed_{idx}"):
+                                new_name = st.text_input("New Reed Type Name", value=reed)
+                                col_save, col_cancel = st.columns(2)
+
+                                with col_save:
+                                    if st.form_submit_button("💾 Save"):
+                                        if st.session_state.db.update_reed_type(reed, new_name):
+                                            st.success(f"Updated to: {new_name}")
+                                            st.session_state[f'editing_reed_{idx}'] = False
+                                            st.rerun()
+
+                                with col_cancel:
+                                    if st.form_submit_button("❌ Cancel"):
+                                        st.session_state[f'editing_reed_{idx}'] = False
+                                        st.rerun()
+                else:
+                    st.info("No reed types available")
+
+            with col2:
+                st.markdown("#### Add New Reed Type")
+                with st.form("add_reed_form"):
+                    new_reed = st.text_input("Reed Type Name")
+                    submitted = st.form_submit_button("➕ Add", use_container_width=True)
+
+                    if submitted:
+                        if new_reed:
+                            success, messages = st.session_state.service.add_reed_type(new_reed)
+                            if success:
+                                for msg in messages:
+                                    st.success(msg)
+                                st.rerun()
+                            else:
+                                for msg in messages:
+                                    st.error(msg)
+                        else:
+                            st.error("Please enter a reed type name")
+
+    # TAB 6: JOB WORKERS - WITH USAGE WARNING
+    with tab6:
+        st.subheader("👨‍🏭 Job Worker Management")
 
         col1, col2 = st.columns([3, 1])
 
@@ -1981,8 +2798,8 @@ elif page == "⚙️ Manage Categories":
                     else:
                         st.error("Please enter a worker name")
 
-    # TAB 5: PRODUCT CATEGORIES - WITH USAGE WARNING
-    with tab5:
+    # TAB 7: PRODUCT CATEGORIES - WITH USAGE WARNING
+    with tab7:
         st.subheader("📦 Product Category Management")
 
         col1, col2 = st.columns([3, 1])
